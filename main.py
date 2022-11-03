@@ -9,12 +9,12 @@ def choose_file_with_monthly_operating_report():
     file_path, check = QFileDialog.getOpenFileName(
         parent=None,
         caption='Выберите файл с МЭР',
-        directory=os.path.dirname(os.getcwd()).replace(os.sep, '/'),
+        directory=os.path.dirname(__file__),
         filter='Excel files (*.xlsx)'
     )
     if check:
         df_initial = pd.read_excel(file_path, sheet_name='МЭР')
-        print(df_initial)
+        df_boundary = pd.read_excel(file_path, sheet_name='ОИЗ')
     
 
 class MainWindow(QWidget):
@@ -24,23 +24,22 @@ class MainWindow(QWidget):
         super().__init__()
 
         self.setWindowTitle('Статистика')
+        self.setFixedSize(QSize(600, 200))
 
         calculate_button = QPushButton('Рассчитать')
         calculate_button.clicked.connect(choose_file_with_monthly_operating_report)
 
         download_button = QPushButton('Загрузить')
 
-        tool_label = QLabel(
+        tool_description_label = QLabel(
             'Инструмент для прогнозирования показателей \nбазовой добычи нефти'
             ' и обводнённости на основе \nмесячного эксплуатационного рапорта (МЭР)'
         )
 
-        self.setFixedSize(QSize(600, 200))
-
         grid_box = QGridLayout()
         grid_box.addWidget(calculate_button, 0, 0)
         grid_box.addWidget(download_button, 0, 1)
-        grid_box.addWidget(tool_label, 1, 0, 1, 2)
+        grid_box.addWidget(tool_description_label, 1, 0, 1, 2)
 
         self.setLayout(grid_box)
 
