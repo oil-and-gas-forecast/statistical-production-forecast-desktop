@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QPushButton, QGridLayout, QLabel, QFileDialog
+from wells_history_preprocessing import history_preprocessing
 
 
 def choose_file_with_monthly_operating_report():
@@ -15,7 +16,16 @@ def choose_file_with_monthly_operating_report():
     if check:
         df_initial = pd.read_excel(file_path, sheet_name='МЭР')
         df_boundary = pd.read_excel(file_path, sheet_name='ОИЗ')
+        main_calculations(df_initial, df_boundary)
     
+
+def main_calculations(
+    df_initial: pd.DataFrame,
+    df_boundary: pd.DataFrame
+):
+    df_initial = history_preprocessing(df_initial, max_delta=365)
+    print(df_initial)
+
 
 class MainWindow(QWidget):
     def __init__(
