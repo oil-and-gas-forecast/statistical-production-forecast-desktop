@@ -1,12 +1,13 @@
 import numpy as np
 import pandas as pd
+import os
 from sklearn.linear_model import LinearRegression
 from scipy import interpolate
 
 
-def calculate_reserves_for_all_wells(
+def calculate_oiz_for_all_wells(
     df_history: pd.DataFrame,
-    min_reserves,
+    min_oiz,
     r_max,
     year_min,
     year_max
@@ -21,44 +22,37 @@ def calculate_reserves_for_all_wells(
         # считаем запасы на основе данных МЭР
         df_well = df_history.loc[df_history['№ скважины'] == well].reset_index(drop=True)
         # сначала пытаемся по всем точкам истории
-        df_well_reserves = calculate_reserves_for_well_based_on_history(
+        df_well_reserves = calculate_oiz_for_well_based_on_history(
             df_well=df_well,
             name_well=well,
             based_on='все точки истории'
         )[0]
         # если не получился результат по всем точкам, пытаемся по трём последним
         if df_well_reserves.empty:
-            df_well_reserves = calculate_reserves_for_well_based_on_history(
+            df_well_reserves = calculate_oiz_for_well_based_on_history(
                 df_well=df_well,
                 name_well=well,
                 based_on='последние 3 точки истории'
             )[0]
             # если снова нет результата по запасам, запоминаем название скважины
-            # (для неё будем считать НИЗ интерполяцией по карте)
+            # (для неё будем считать НИЗ и ОИЗ интерполяцией по карте)
             if df_well_reserves.empty:
                 wells_with_error.append(well)
                 continue
         
-        # перерасчёт ОИЗ успешно обработанных скважин с учётом ограничений
-        new_oiz = df_well_reserves['ОИЗ']
-        if df_well_reserves['Оставшееся время работы, прогноз, лет'].values[0] > year_max:
-            new_oiz = (df_well_reserves['Добыча нефти за посл. мес работы скв., т'] +
-                       df_well_reserves['Добыча нефти за предпосл. мес работы скв., т']) * year_max * 6
-        elif df_well_reserves['Оставшееся время работы, прогноз, лет'].values[0] < year_min:
-            new_oiz = (df_well_reserves['Добыча нефти за посл. мес работы скв., т'] +
-                       df_well_reserves['Добыча нефти за предпосл. мес работы скв., т']) * year_min * 6
-        if df_well_reserves['ОИЗ'].values[0] < min_reserves:
-            new_oiz = min_reserves
-        
-        df_well_reserves['ОИЗ'] = new_oiz
-        df_well_reserves['Оставшееся время работы, прогноз, лет'] = new_oiz / \
-            (df_well_reserves['Добыча нефти за посл. мес работы скв., т'] * 12)
+        # перерасчёт ОИЗ успешно обработанных скважин с учётом ограничений (min_oiz, year_min, year_max)
+        df_well_reserves = recalculate_oiz_using_restrictions(
+            df_well_reserves=df_well_reserves,
+            min_oiz=min_oiz,
+            year_min=year_min,
+            year_max=year_max
+        )
 
         df_reserves_based_on_history = pd.concat([df_reserves_based_on_history, df_well_reserves])
 
     # расчёт НИЗ интерполяцией по карте
     # (для скважин, у которых не удалось получить результат на основе МЭР)
-
+    print(wells_with_error)
     # координаты забоев всех скважин
     df_coordinates = df_history[[
         '№ скважины',
@@ -89,17 +83,51 @@ def calculate_reserves_for_all_wells(
         df_with_errors[['Скважина']], left_index=True, right_index=True
     )
 
+    new_niz = []
+    new_oiz =[]
+    warns = []
+
     for well in wells_with_error:
-        calculate_reserves_for_well_based_on_map(
-            x=df_with_errors['Координата забоя Х (по траектории)'][well],
-            y=df_with_errors['Координата забоя Y (по траектории)'][well],
+
+        df_well = df_history.loc[df_history['№ скважины'] == well].reset_index(drop=True)
+        df_well['Накопленная добыча нефти, т'] = df_well['Добыча нефти за посл.месяц, т'].cumsum()
+
+        new_niz_int, new_oiz_int, warn = calculate_oiz_for_well_based_on_map(
+            name_well=well,
+            df_well=df_well,
+            df_with_errors=df_with_errors,
             df_field=df_field,
-            r_max=r_max
+            r_max=r_max,
+            min_oiz=min_oiz,
+            year_min=year_min,
+            year_max=year_max
         )
-        # TODO: доделать
+        new_niz.append(new_niz_int)
+        new_oiz.append(new_oiz_int)
+        warns.append(warn)
+    
+    df_with_errors['НИЗ'] = new_niz
+    df_with_errors['ОИЗ'] = new_oiz
+    df_with_errors['Предупреждение'] = warns
+
+    df_all_reserves = pd.concat([
+        df_with_errors[['Скважина', 'ОИЗ']],
+        df_reserves_based_on_history[['Скважина', 'ОИЗ']]
+    ])
+    df_all_reserves['ОИЗ'] = df_all_reserves['ОИЗ'] / 1000
+
+    df_reserves_based_on_history = df_reserves_based_on_history.set_index('Скважина')
+    df_with_errors = df_with_errors.set_index('Скважина')
+
+    write_reserves_to_excel(
+        df_reserves_based_on_history=df_reserves_based_on_history,
+        df_with_errors=df_with_errors
+    )
+
+    return df_all_reserves
 
 
-def calculate_reserves_for_well_based_on_history(
+def calculate_oiz_for_well_based_on_history(
     df_well: pd.DataFrame,
     name_well: str,
     based_on='все точки истории'
@@ -145,18 +173,44 @@ def calculate_reserves_for_well_based_on_history(
     )
 
     # проверка на возможные ошибки в итоговом датафрейме
-    check = check_calculated_reserves(df_well_result)
+    df_well_result, check = check_calculated_reserves(df_well_result)
     if check:
         error = check
     
+    df_well_result = df_well_result.sort_values('ОИЗ')
+    df_well_result = df_well_result.tail(1)
+
     # запись информации о количестве использованных точек МЭР при расчёте
     if not df_well_result.empty:
-        if based_on == 'все точки':
-            df_well_result['Метка'] = 'Расчёт по всем точкам истории'
+        if based_on == 'все точки истории':
+            df_well_result['Предупреждение'] = 'Расчёт по всем точкам истории'
         else:
-            df_well_result['Метка'] = 'Расчёт по последним 3-м точкам истории'
+            df_well_result['Предупреждение'] = 'Расчёт по последним 3-м точкам истории'
     
     return df_well_result, error
+
+
+def recalculate_oiz_using_restrictions(
+    df_well_reserves: pd.DataFrame,
+    min_oiz,
+    year_min,
+    year_max
+):
+    new_oiz = df_well_reserves['ОИЗ']
+    if df_well_reserves['Оставшееся время работы, прогноз, лет'].values[0] > year_max:
+        new_oiz = (df_well_reserves['Добыча нефти за посл. мес работы скв., т'] +
+                    df_well_reserves['Добыча нефти за предпосл. мес работы скв., т']) * year_max * 6
+    elif df_well_reserves['Оставшееся время работы, прогноз, лет'].values[0] < year_min:
+        new_oiz = (df_well_reserves['Добыча нефти за посл. мес работы скв., т'] +
+                    df_well_reserves['Добыча нефти за предпосл. мес работы скв., т']) * year_min * 6
+    if df_well_reserves['ОИЗ'].values[0] < min_oiz:
+        new_oiz = min_oiz
+        
+    df_well_reserves['ОИЗ'] = new_oiz
+    df_well_reserves['Оставшееся время работы, прогноз, лет'] = new_oiz / \
+        (df_well_reserves['Добыча нефти за посл. мес работы скв., т'] * 12)
+    
+    return df_well_reserves
 
 
 def prepare_df_for_statistical_methods(
@@ -173,9 +227,9 @@ def prepare_df_for_statistical_methods(
     df_well['Отношение накопленной добычи жидкости к накопленной добыче нефти'] = \
         df_well['Накопленная добыча жидкости, т'] / df_well['Накопленная добыча нефти, т']
 
-    df_well['Логарифм накопленной добычи жидкости, т'] = np.log(df_well['Накопленная добыча жидкости, т'])
-    df_well['Логарифм накопленной добычи воды, т'] = np.log(df_well['Накопленная добыча воды, т'])
-    df_well['Логарифм накопленной добычи нефти, т'] = np.log(df_well['Накопленная добыча нефти, т'])
+    df_well['Логарифм накопленной добычи жидкости'] = np.log(df_well['Накопленная добыча жидкости, т'])
+    df_well['Логарифм накопленной добычи воды'] = np.log(df_well['Накопленная добыча воды, т'])
+    df_well['Логарифм накопленной добычи нефти'] = np.log(df_well['Накопленная добыча нефти, т'])
 
     df_well['Год'] = df_well['Дата'].map(lambda x: x.year)
 
@@ -198,10 +252,10 @@ def linear_model_with_given_statistical_method(
             y = df_well['Отношение накопленной добычи жидкости к накопленной добыче нефти']
         case 'Maksimov':
             x = df_well['Накопленная добыча нефти, т'].values.reshape((-1, 1))
-            y = df_well['Логарифм накопленной добычи воды, т']
+            y = df_well['Логарифм накопленной добычи воды']
         case 'Sazonov':
             x = df_well['Накопленная добыча нефти, т'].values.reshape((-1, 1))
-            y = df_well['Логарифм накопленной добычи жидкости, т']
+            y = df_well['Логарифм накопленной добычи жидкости']
     
     model = LinearRegression().fit(x, y)
     a = model.coef_
@@ -241,8 +295,8 @@ def check_calculated_reserves(
     if df_well_result.empty:
         error = 'Остаточные запасы <= 0'
     
-    df_up = df_well_result.loc[df_well_result['Korrelation'] > 0.7]
-    df_down = df_well_result.loc[df_well_result['Korrelation'] < (-0.7)]
+    df_up = df_well_result.loc[df_well_result['Correlation'] > 0.7]
+    df_down = df_well_result.loc[df_well_result['Correlation'] < (-0.7)]
     df_well_result = pd.concat([df_up, df_down]).reset_index()
     if df_well_result.empty:
         error = 'Корреляция <0.7 или >-0.7'
@@ -251,7 +305,7 @@ def check_calculated_reserves(
     if df_well_result.empty:
         error = 'Оставшееся время работы превышает 50 лет'
     
-    return error
+    return df_well_result, error
 
 
 def create_df_with_reserves(
@@ -277,19 +331,24 @@ def create_df_with_reserves(
     df_well_result['Координата X'] = float(df_well['Координата забоя Х (по траектории)'][-1:])
     df_well_result['Координата Y'] = float(df_well['Координата забоя Y (по траектории)'][-1:])
 
-    df_well_result = df_well_result.sort_values('ОИЗ')
-    df_well_result = df_well_result.tail(1)
-
     return df_well_result
 
 
-def calculate_reserves_for_well_based_on_map(
-    x,
-    y,
+def calculate_oiz_for_well_based_on_map(
+    name_well,
+    df_well,
+    df_with_errors,
     df_field,
-    r_max
+    r_max,
+    min_oiz,
+    year_min,
+    year_max,
 ):
     warns = []
+    
+    x = df_with_errors['Координата забоя Х (по траектории)'][name_well]
+    y = df_with_errors['Координата забоя Y (по траектории)'][name_well]
+
     distance = ((x - df_field['Координата забоя Х (по траектории)']) ** 2 +
                 (y - df_field['Координата забоя Y (по траектории)']) ** 2) ** 0.5
     r_min = distance.min()
@@ -305,7 +364,54 @@ def calculate_reserves_for_well_based_on_map(
             table_y=df_field[['Координата забоя Y (по траектории)']],
             table_z=df_field[['НИЗ']]
         )
-    # TODO: доделать
+    
+    if len(df_well['Накопленная добыча нефти, т']) > 1:
+        # добыча нефти за предпоследний месяц истории
+        q_before_the_last = float(df_well['Добыча нефти за посл.месяц, т'][-2:-1])
+    else:
+        q_before_the_last = 0
+        
+    # добыча нефти за последний месяц истории
+    q_last = df_well['Добыча нефти за посл.месяц, т'].values[-1]
+
+    # накопленная добыча нефти за всю историю работы скважины
+    cumulative_oil_production = df_well['Накопленная добыча нефти, т'].values[-1]
+
+    new_oiz_list = []
+
+    for k in gur:
+        oiz = k - cumulative_oil_production
+        if oiz > 0:
+            new_oiz_list.append(oiz)
+
+    if len(new_oiz_list) == 0:
+        new_oiz = (q_before_the_last + q_last) * year_min * 6
+    elif len(new_oiz_list) == 1:
+        new_oiz = new_oiz_list[0]
+        forecast_residual_operation_time = new_oiz / (q_last * 12)
+        if forecast_residual_operation_time > year_max:
+            new_oiz = (q_before_the_last + q_last) * year_max * 6
+        elif forecast_residual_operation_time  < year_min:
+            new_oiz = (q_before_the_last + q_last) * year_min * 6
+    else:
+        forecast_residual_operation_time_1 = new_oiz_list[0] / (q_last * 12)
+        forecast_residual_operation_time_2 = new_oiz_list[1] / (q_last * 12)
+        if forecast_residual_operation_time_1 < year_max and forecast_residual_operation_time_1 > year_min:
+            new_oiz = new_oiz_list[0]
+        else:
+            if forecast_residual_operation_time_2 < year_max and forecast_residual_operation_time_2 > year_min:
+                new_oiz = new_oiz_list[1]
+            else:
+                if forecast_residual_operation_time_1 > year_max:
+                    new_oiz = (q_before_the_last + q_last) * year_max * 6
+                elif forecast_residual_operation_time_1 < year_min:
+                    new_oiz = (q_before_the_last + q_last) * year_min * 6
+    if new_oiz < min_oiz:
+        new_oiz = min_oiz
+    new_oiz_int = int(new_oiz)
+    new_niz_int = int(new_oiz + cumulative_oil_production)
+
+    return new_niz_int, new_oiz_int, warns
 
 
 def interpolate_gur(
@@ -335,3 +441,26 @@ def interpolate_gur(
         gur_2 = gur_2(x, y)[0]
     
     return gur_1, gur_2
+
+
+def write_reserves_to_excel(
+    df_reserves_based_on_history: pd.DataFrame,
+    df_with_errors: pd.DataFrame
+):
+    with pd.ExcelWriter(os.path.join(os.path.dirname(__file__), 'data', 'Подсчёт ОИЗ.xlsx')) as writer:
+        df_reserves_based_on_history.to_excel(
+            writer,
+            sheet_name='Расчёт по истории',
+            startrow=0,
+            startcol=0,
+            header=True,
+            index=True
+        )
+        df_with_errors.to_excel(
+            writer,
+            sheet_name='Расчёт по карте',
+            startrow=0,
+            startcol=0,
+            header=True,
+            index=True
+        )
