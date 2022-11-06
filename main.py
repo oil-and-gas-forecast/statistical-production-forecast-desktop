@@ -196,7 +196,13 @@ def create_dicts_with_essential_data(
     df_initial,
     df_boundary
 ) -> tuple:
-    oiz_dict = calculate_oiz_for_all_wells(df_initial, 2000, 1000, 5, 50).set_index('Скважина').T.to_dict('list')
+    oiz_dict = calculate_oiz_for_all_wells(
+        df_history=df_initial,
+        min_oiz=0,
+        r_max=1000,
+        year_min=0,
+        year_max=np.inf
+    ).set_index('Скважина').T.to_dict('list')
 
     df_boundary = df_boundary.drop(df_boundary.columns[1], axis='columns')
     boundaries_dict = df_boundary.set_index('№ скв.').T.to_dict('list')

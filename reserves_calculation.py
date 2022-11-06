@@ -177,6 +177,7 @@ def calculate_oiz_for_well_based_on_history(
     if check:
         error = check
     
+    # из всех прошедших контроль значений ОИЗ оставляем только самое большое значение
     df_well_result = df_well_result.sort_values('ОИЗ')
     df_well_result = df_well_result.tail(1)
 
