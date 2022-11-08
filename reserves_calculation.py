@@ -7,22 +7,22 @@ from scipy import interpolate
 
 def calculate_oiz_for_all_wells(
     df_history: pd.DataFrame,
-    min_oiz,
-    r_max,
-    year_min,
-    year_max
-):
-    wells_set = set(df_history['№ скважины'])
-    df_reserves_based_on_history = pd.DataFrame()
-    wells_with_error = []
+    min_oiz: float = 0.0,
+    r_max: float = 1000.0,
+    year_min: float = 0.0,
+    year_max: float = np.inf
+) -> pd.DataFrame:
+    wells_set: set = set(df_history['№ скважины'])
+    df_reserves_based_on_history: pd.DataFrame = pd.DataFrame()
+    wells_with_error: list = []
 
     for well in wells_set:
         print(well)
 
         # считаем запасы на основе данных МЭР
-        df_well = df_history.loc[df_history['№ скважины'] == well].reset_index(drop=True)
+        df_well: pd.DataFrame = df_history.loc[df_history['№ скважины'] == well].reset_index(drop=True)
         # сначала пытаемся по всем точкам истории
-        df_well_reserves = calculate_oiz_for_well_based_on_history(
+        df_well_reserves: pd.DataFrame = calculate_oiz_for_well_based_on_history(
             df_well=df_well,
             name_well=well,
             based_on='все точки истории'
@@ -54,7 +54,7 @@ def calculate_oiz_for_all_wells(
     # (для скважин, у которых не удалось получить результат на основе МЭР)
     print(wells_with_error)
     # координаты забоев всех скважин
-    df_coordinates = df_history[[
+    df_coordinates: pd.DataFrame = df_history[[
         '№ скважины',
         'Координата забоя Х (по траектории)',
         'Координата забоя Y (по траектории)'
@@ -63,8 +63,8 @@ def calculate_oiz_for_all_wells(
     df_coordinates.set_index('№ скважины', inplace=True)
 
     # координаты забоев и значения НИЗ для скважин с найденными (на основе МЭР) НИЗ
-    df_already_calculated = df_reserves_based_on_history.set_index('Скважина')
-    df_field = pd.merge(
+    df_already_calculated: pd.DataFrame = df_reserves_based_on_history.set_index('Скважина')
+    df_field: pd.DataFrame = pd.merge(
         df_coordinates[[
             'Координата забоя Х (по траектории)',
             'Координата забоя Y (по траектории)'
@@ -73,7 +73,7 @@ def calculate_oiz_for_all_wells(
     )
 
     # координаты забоев скважин, для которых не удалось рассчитать НИЗ на основе МЭР
-    df_with_errors = pd.DataFrame({'Скважина': wells_with_error, '№ скважины': wells_with_error})
+    df_with_errors: pd.DataFrame = pd.DataFrame({'Скважина': wells_with_error, '№ скважины': wells_with_error})
     df_with_errors.set_index('№ скважины', inplace=True)
     df_with_errors = pd.merge(
         df_coordinates[[
@@ -83,9 +83,9 @@ def calculate_oiz_for_all_wells(
         df_with_errors[['Скважина']], left_index=True, right_index=True
     )
 
-    new_niz = []
-    new_oiz =[]
-    warns = []
+    new_niz: list = []
+    new_oiz: list = []
+    warns: list = []
 
     for well in wells_with_error:
 
@@ -129,34 +129,34 @@ def calculate_oiz_for_all_wells(
 
 def calculate_oiz_for_well_based_on_history(
     df_well: pd.DataFrame,
-    name_well: str,
-    based_on='все точки истории'
-) -> tuple:
+    name_well: str | int,
+    based_on: str = 'все точки истории'
+) -> tuple[pd.DataFrame, str]:
 
     df_well = prepare_df_for_statistical_methods(df_well)
-    error = ''
+    error: str = ''
 
-    q_before_the_last = 0
+    q_before_the_last: float = 0.0
 
     match based_on:
         case 'все точки истории':
             if len(df_well['Накопленная добыча нефти, т']) > 1:
-                q_before_the_last = float(df_well['Добыча нефти за посл.месяц, т'][-2:-1])
+                q_before_the_last = float(df_well['Добыча нефти за посл.месяц, т'].iloc[-2:-1])
             else:
                 error = 'имеется только одна точка'
         case 'последние 3 точки истории':
             if len(df_well['Накопленная добыча нефти, т']) > 2:
                 df_well = df_well.tail(3)
-                q_last = float(df_well['Добыча нефти за посл.месяц, т'][-1:])
-                q_before_the_last = float(df_well['Добыча нефти за посл.месяц, т'][-2:-1])
+                q_last: float = float(df_well['Добыча нефти за посл.месяц, т'].iloc[-1:])
+                q_before_the_last: float = float(df_well['Добыча нефти за посл.месяц, т'].iloc[-2:-1])
                 if q_last / q_before_the_last < 0.25:
                     df_well = df_well[:-1]
             else:
                 error = 'имеется только одна или две точки'
 
     # построение моделей на основе статистических методов
-    models = []  # list of tuples; (niz, oiz, correlation, determination)
-    methods = ['Nazarov_Sipachev', 'Sipachev_Pasevich', 'FNI', 'Maksimov', 'Sazonov']
+    models: list = []  # list of tuples; (niz, oiz, correlation, determination)
+    methods: list = ['Nazarov_Sipachev', 'Sipachev_Pasevich', 'FNI', 'Maksimov', 'Sazonov']
     for name in methods:
         models.append(linear_model_with_given_statistical_method(
             df_well=df_well,
@@ -164,7 +164,7 @@ def calculate_oiz_for_well_based_on_history(
         ))
 
     # формирование итогового датафрейма
-    df_well_result = create_df_with_reserves(
+    df_well_result: pd.DataFrame = create_df_with_reserves(
         name_well=name_well,
         df_well=df_well,
         methods=methods,
@@ -173,7 +173,7 @@ def calculate_oiz_for_well_based_on_history(
     )
 
     # проверка на возможные ошибки в итоговом датафрейме
-    df_well_result, check = check_calculated_reserves(df_well_result)
+    check: str | None; df_well_result, check = check_calculated_reserves(df_well_result)
     if check:
         error = check
     
@@ -193,11 +193,11 @@ def calculate_oiz_for_well_based_on_history(
 
 def recalculate_oiz_using_restrictions(
     df_well_reserves: pd.DataFrame,
-    min_oiz,
-    year_min,
-    year_max
-):
-    new_oiz = df_well_reserves['ОИЗ']
+    min_oiz: float,
+    year_min: float,
+    year_max: float
+) -> pd.DataFrame:
+    new_oiz: pd.Series = df_well_reserves['ОИЗ']
     if df_well_reserves['Оставшееся время работы, прогноз, лет'].values[0] > year_max:
         new_oiz = (df_well_reserves['Добыча нефти за посл. мес работы скв., т'] +
                     df_well_reserves['Добыча нефти за предпосл. мес работы скв., т']) * year_max * 6
@@ -240,7 +240,7 @@ def prepare_df_for_statistical_methods(
 def linear_model_with_given_statistical_method(
     df_well: pd.DataFrame,
     method: str
-) -> tuple:
+) -> tuple[float, float, float, float]:
     match method:
         case 'Nazarov_Sipachev':
             x = df_well['Накопленная добыча воды, т'].values.reshape((-1, 1))
@@ -258,12 +258,14 @@ def linear_model_with_given_statistical_method(
             x = df_well['Накопленная добыча нефти, т'].values.reshape((-1, 1))
             y = df_well['Логарифм накопленной добычи жидкости']
     
-    model = LinearRegression().fit(x, y)
-    a = model.coef_
-    b = model.intercept_
+    model: LinearRegression = LinearRegression().fit(x, y)
+    a: np.ndarray | float = model.coef_
+    b: float = model.intercept_
     a = float(a)
     a = np.fabs(a)
-    cumulative_oil_production = df_well['Накопленная добыча нефти, т'].values[-1]
+    cumulative_oil_production: float = df_well['Накопленная добыча нефти, т'].values[-1]
+    niz: float = 0
+    oiz: float = 0
     if a != 0:
         match method:
             case 'Nazarov_Sipachev':
@@ -275,29 +277,26 @@ def linear_model_with_given_statistical_method(
             case 'Maksimov' | 'Sazonov':
                 niz = (1 / a) * np.log(0.99 / ((1 - 0.99) * a * np.exp(b)))
         oiz = niz - cumulative_oil_production  # остаточные извлекаемые запасы нефти
-    else:
-        niz = 0
-        oiz = 0
-    correlation = np.fabs(np.corrcoef(
+    correlation: float = np.fabs(np.corrcoef(
         df_well['Накопленная добыча воды, т'],
         df_well['Отношение накопленной добычи жидкости к накопленной добыче нефти']
     )[1, 0])
-    determination = model.score(x, y)
+    determination: float = model.score(x, y)
 
     return niz, oiz, correlation, determination
 
 
 def check_calculated_reserves(
     df_well_result: pd.DataFrame
-):
-    error = None
+) -> tuple[pd.DataFrame, str | None]:
+    error: str | None = None
 
     df_well_result = df_well_result.loc[df_well_result['ОИЗ'] > 0]
     if df_well_result.empty:
         error = 'Остаточные запасы <= 0'
     
-    df_up = df_well_result.loc[df_well_result['Correlation'] > 0.7]
-    df_down = df_well_result.loc[df_well_result['Correlation'] < (-0.7)]
+    df_up: pd.DataFrame = df_well_result.loc[df_well_result['Correlation'] > 0.7]
+    df_down: pd.DataFrame = df_well_result.loc[df_well_result['Correlation'] < (-0.7)]
     df_well_result = pd.concat([df_up, df_down]).reset_index()
     if df_well_result.empty:
         error = 'Корреляция <0.7 или >-0.7'
@@ -314,9 +313,9 @@ def create_df_with_reserves(
     df_well: pd.DataFrame,
     methods: list,
     models: list,
-    q_before_the_last
-):
-    df_well_result = pd.DataFrame()
+    q_before_the_last: float
+) -> pd.DataFrame:
+    df_well_result: pd.DataFrame = pd.DataFrame()
     df_well_result['НИЗ'] = [model[0] for model in models]
     df_well_result['ОИЗ'] = [model[1] for model in models]
     df_well_result['Метод'] = methods
@@ -329,36 +328,36 @@ def create_df_with_reserves(
     df_well_result['Оставшееся время работы, прогноз, лет'] = \
         df_well_result['ОИЗ'] / (df_well_result['Добыча нефти за посл. мес работы скв., т'] * 12)
     df_well_result['Время работы, прошло, лет'] = int(df_well['Год'].tail(1)) - int(df_well['Год'].head(1))
-    df_well_result['Координата X'] = float(df_well['Координата забоя Х (по траектории)'][-1:])
-    df_well_result['Координата Y'] = float(df_well['Координата забоя Y (по траектории)'][-1:])
+    df_well_result['Координата X'] = float(df_well['Координата забоя Х (по траектории)'].iloc[-1:])
+    df_well_result['Координата Y'] = float(df_well['Координата забоя Y (по траектории)'].iloc[-1:])
 
     return df_well_result
 
 
 def calculate_oiz_for_well_based_on_map(
-    name_well,
-    df_well,
-    df_with_errors,
-    df_field,
-    r_max,
-    min_oiz,
-    year_min,
-    year_max,
-):
-    warns = []
+    name_well: str | int,
+    df_well: pd.DataFrame,
+    df_with_errors: pd.DataFrame,
+    df_field: pd.DataFrame,
+    r_max: float,
+    min_oiz: float,
+    year_min: float,
+    year_max: float,
+) -> tuple[int, int, list]:
+    warns: list = []
     
-    x = df_with_errors['Координата забоя Х (по траектории)'][name_well]
-    y = df_with_errors['Координата забоя Y (по траектории)'][name_well]
+    x: float | int = df_with_errors['Координата забоя Х (по траектории)'][name_well]
+    y: float | int = df_with_errors['Координата забоя Y (по траектории)'][name_well]
 
-    distance = ((x - df_field['Координата забоя Х (по траектории)']) ** 2 +
+    distance: float = ((x - df_field['Координата забоя Х (по траектории)']) ** 2 +
                 (y - df_field['Координата забоя Y (по траектории)']) ** 2) ** 0.5
-    r_min = distance.min()
+    r_min: float = distance.min()
     if r_min > r_max:
         warns.append('! Ближайшая скважина на расстоянии ' + str(r_min))
     else:
         warns.append('Скважина в пределах ограничений')
     
-    gur = interpolate_gur(
+    gur: tuple[float, float] = interpolate_gur(
             x=x,
             y=y,
             table_x=df_field[['Координата забоя Х (по траектории)']],
@@ -366,25 +365,26 @@ def calculate_oiz_for_well_based_on_map(
             table_z=df_field[['НИЗ']]
         )
     
+    q_before_the_last: float = 0.0
     if len(df_well['Накопленная добыча нефти, т']) > 1:
         # добыча нефти за предпоследний месяц истории
-        q_before_the_last = float(df_well['Добыча нефти за посл.месяц, т'][-2:-1])
-    else:
-        q_before_the_last = 0
-        
+        q_before_the_last = float(df_well['Добыча нефти за посл.месяц, т'].iloc[-2:-1])
+    
     # добыча нефти за последний месяц истории
-    q_last = df_well['Добыча нефти за посл.месяц, т'].values[-1]
+    q_last: float = df_well['Добыча нефти за посл.месяц, т'].values[-1]
 
     # накопленная добыча нефти за всю историю работы скважины
-    cumulative_oil_production = df_well['Накопленная добыча нефти, т'].values[-1]
+    cumulative_oil_production: float = df_well['Накопленная добыча нефти, т'].values[-1]
 
-    new_oiz_list = []
+    new_oiz_list: list = []
 
+    oiz: float = 0.0
     for k in gur:
         oiz = k - cumulative_oil_production
         if oiz > 0:
             new_oiz_list.append(oiz)
-
+    
+    new_oiz: float = 0.0
     if len(new_oiz_list) == 0:
         new_oiz = (q_before_the_last + q_last) * year_min * 6
     elif len(new_oiz_list) == 1:
@@ -409,8 +409,8 @@ def calculate_oiz_for_well_based_on_map(
                     new_oiz = (q_before_the_last + q_last) * year_min * 6
     if new_oiz < min_oiz:
         new_oiz = min_oiz
-    new_oiz_int = int(new_oiz)
-    new_niz_int = int(new_oiz + cumulative_oil_production)
+    new_oiz_int: int = int(new_oiz)
+    new_niz_int: int = int(new_oiz + cumulative_oil_production)
 
     return new_niz_int, new_oiz_int, warns
 
@@ -418,27 +418,27 @@ def calculate_oiz_for_well_based_on_map(
 def interpolate_gur(
     x,
     y,
-    table_x,
-    table_y,
-    table_z
-) -> tuple:
+    table_x: pd.Series,
+    table_y: pd.Series,
+    table_z: pd.Series
+) -> tuple[float, float]:
 
-    table_x = np.reshape(np.array(table_x, dtype='float64'), (-1,))
-    table_y = np.reshape(np.array(table_y, dtype='float64'), (-1,))
-    table_z = np.reshape(np.array(table_z, dtype='float64'), (-1,))
+    table_x: np.ndarray = np.reshape(np.array(table_x, dtype='float64'), (-1,))
+    table_y: np.ndarray = np.reshape(np.array(table_y, dtype='float64'), (-1,))
+    table_z: np.ndarray = np.reshape(np.array(table_z, dtype='float64'), (-1,))
 
     if len(table_x) <= 16:
-        gur_1 = interpolate.interp2d(table_x, table_y, table_z, kind='linear')
+        gur_1: interpolate.interp2d | float = interpolate.interp2d(table_x, table_y, table_z, kind='linear')
         gur_1 = gur_1(x, y)[0]
-        gur_2 = gur_1
+        gur_2: interpolate.interp2d | float = gur_1
     else:
-        gur_1 = interpolate.griddata(
+        gur_1: interpolate.interp2d | float = interpolate.griddata(
             (table_x, table_y),
             table_z,
             (x, y),
             method='cubic'
         )
-        gur_2 = interpolate.interp2d(table_x, table_y, table_z, kind='cubic')
+        gur_2: interpolate.interp2d | float = interpolate.interp2d(table_x, table_y, table_z, kind='cubic')
         gur_2 = gur_2(x, y)[0]
     
     return gur_1, gur_2

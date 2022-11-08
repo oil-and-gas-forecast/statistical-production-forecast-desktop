@@ -11,15 +11,15 @@ from displacement_characteristic_model import DisplacementCharacteristic
 
 
 def choose_file_with_monthly_operating_report():
-    file_path, check = QFileDialog.getOpenFileName(
+    file_path: str; check: str; file_path, check = QFileDialog.getOpenFileName(
         parent=None,
         caption='Выберите файл с МЭР',
         directory=os.path.dirname(__file__),
         filter='Excel files (*.xlsx)'
     )
     if check:
-        df_initial = pd.read_excel(file_path, sheet_name='МЭР')
-        df_boundary = pd.read_excel(file_path, sheet_name='ОИЗ')
+        df_initial: pd.DataFrame = pd.read_excel(file_path, sheet_name='МЭР')
+        df_boundary: pd.DataFrame = pd.read_excel(file_path, sheet_name='ОИЗ')
         main_calculations(df_initial, df_boundary)
 
 
@@ -189,33 +189,33 @@ def main_calculations(
         output[well] = [output[well][0], output[well][1], output[well][2],
                         marker_text, [fluid_rates], [oil_rates],
                         [time_in_prod], [dates], current_recovery_factor]
-    print(output)
+    #print(output)
 
 
 def create_dicts_with_essential_data(
-    df_initial,
-    df_boundary
-) -> tuple:
-    oiz_dict = calculate_oiz_for_all_wells(
+    df_initial: pd.DataFrame,
+    df_boundary: pd.DataFrame
+) -> tuple[dict, dict, dict]:
+    oiz_dict: dict = calculate_oiz_for_all_wells(
         df_history=df_initial,
-        min_oiz=0,
-        r_max=1000,
-        year_min=0,
+        min_oiz=0.0,
+        r_max=1000.0,
+        year_min=0.0,
         year_max=np.inf
     ).set_index('Скважина').T.to_dict('list')
 
     df_boundary = df_boundary.drop(df_boundary.columns[1], axis='columns')
-    boundaries_dict = df_boundary.set_index('№ скв.').T.to_dict('list')
+    boundaries_dict: dict = df_boundary.set_index('№ скв.').T.to_dict('list')
 
-    time_in_production = df_initial['Время работы в добыче, часы'].ravel()
-    wells = df_initial['№ скважины'].ravel()
-    last_oil_rate = df_initial['Добыча нефти за посл.месяц, т'].ravel()
-    last_fluid_rate = df_initial['Добыча жидкости за посл.месяц, т'].ravel()
-    dates = df_initial['Дата'].ravel()
+    time_in_production: np.ndarray = df_initial['Время работы в добыче, часы'].ravel()
+    wells: np.ndarray = df_initial['№ скважины'].ravel()
+    last_oil_rate: np.ndarray = df_initial['Добыча нефти за посл.месяц, т'].ravel()
+    last_fluid_rate: np.ndarray = df_initial['Добыча жидкости за посл.месяц, т'].ravel()
+    dates: np.ndarray = df_initial['Дата'].ravel()
 
-    unique_wells = list(set(wells))
+    unique_wells: list = list(set(wells))
 
-    wells_data_dict = {}
+    wells_data_dict: dict = {}
 
     for well in unique_wells:
         wells_data_dict[well] = [[], [], [], []]
